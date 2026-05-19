@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ShoppingBag, Heart, User, Menu, X, Search, ChevronDown, Bell } from 'lucide-react';
+import { ShoppingBag, Heart, User, Menu, X, Search, ChevronDown } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useCart } from '../../context/CartContext';
 
@@ -54,14 +54,14 @@ const Navbar = () => {
       </div>
 
       <header className="bg-white border-b border-primary-100 sticky top-0 z-50 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4">
-          <div className="flex items-center justify-between h-16">
+        <div className="max-w-7xl mx-auto px-3 sm:px-4">
+          <div className="flex items-center justify-between h-14 sm:h-16">
             {/* Logo */}
-            <Link to="/" className="flex-shrink-0">
-              <div className="font-display text-2xl font-bold text-boho-terra tracking-wide">
+            <Link to="/" className="min-w-0 flex-shrink">
+              <div className="font-display text-xl font-bold text-boho-terra tracking-wide sm:text-2xl">
                 Boho<span className="text-boho-dark">Jazz</span>
               </div>
-              <div className="text-[9px] font-body tracking-[0.2em] text-gray-400 uppercase -mt-1">
+              <div className="text-[8px] font-body tracking-[0.16em] text-gray-400 uppercase -mt-1 truncate sm:text-[9px] sm:tracking-[0.2em]">
                 Classic · Contemporary · Fusion
               </div>
             </Link>
@@ -80,16 +80,16 @@ const Navbar = () => {
             </nav>
 
             {/* Actions */}
-            <div className="flex items-center gap-2">
+            <div className="flex flex-shrink-0 items-center gap-0.5 sm:gap-2">
               {/* Search */}
               <button onClick={() => setSearchOpen(!searchOpen)}
-                className="p-2 rounded-full hover:bg-primary-50 transition-colors text-gray-600 hover:text-boho-terra">
-                <Search size={20} />
+                className="rounded-full p-2 text-gray-600 transition-colors hover:bg-primary-50 hover:text-boho-terra">
+                <Search size={18} className="sm:h-5 sm:w-5" />
               </button>
 
               {/* Cart */}
-              <Link to="/cart" className="relative p-2 rounded-full hover:bg-primary-50 transition-colors text-gray-600 hover:text-boho-terra">
-                <ShoppingBag size={20} />
+              <Link to="/cart" className="relative rounded-full p-2 text-gray-600 transition-colors hover:bg-primary-50 hover:text-boho-terra">
+                <ShoppingBag size={18} className="sm:h-5 sm:w-5" />
                 {cart.item_count > 0 && (
                   <span className="absolute -top-1 -right-1 bg-boho-terra text-white text-xs w-5 h-5 rounded-full flex items-center justify-center font-bold">
                     {cart.item_count > 9 ? '9+' : cart.item_count}
@@ -159,8 +159,12 @@ const Navbar = () => {
               )}
 
               {/* Mobile menu */}
-              <button onClick={() => setMenuOpen(!menuOpen)} className="lg:hidden p-2 text-gray-600">
-                {menuOpen ? <X size={22} /> : <Menu size={22} />}
+              <button
+                onClick={() => setMenuOpen(!menuOpen)}
+                className="ml-0.5 flex h-9 w-9 items-center justify-center rounded-full text-gray-600 transition-colors hover:bg-primary-50 lg:hidden"
+                aria-label="Toggle menu"
+              >
+                {menuOpen ? <X size={20} /> : <Menu size={20} />}
               </button>
             </div>
           </div>

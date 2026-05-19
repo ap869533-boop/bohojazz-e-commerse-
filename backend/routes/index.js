@@ -40,6 +40,16 @@ router.post('/auth/login', [
   body('password').notEmpty()
 ], authCtrl.login);
 
+router.post('/auth/forgot-password/request-otp', [
+  body('email').isEmail().normalizeEmail(),
+], authCtrl.requestPasswordResetOtp);
+
+router.post('/auth/forgot-password/reset', [
+  body('email').isEmail().normalizeEmail(),
+  body('otp').trim().isLength({ min: 6, max: 6 }).isNumeric(),
+  body('newPassword').isLength({ min: 8 }).matches(/^(?=.*[A-Za-z])(?=.*\d)/),
+], authCtrl.resetPasswordWithOtp);
+
 router.post('/auth/refresh', authCtrl.refreshToken);
 router.post('/auth/logout', authCtrl.logout);
 router.get('/auth/me', authenticate, authCtrl.getMe);

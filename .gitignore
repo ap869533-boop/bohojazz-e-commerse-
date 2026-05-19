@@ -6,9 +6,11 @@ build
 # frontend
 frontend/node_modules
 frontend/.env
+frontend/.env.example
 
 
 # backend
 backend/node_modules
 backend/.env
+backend/.env.example
 

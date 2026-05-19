@@ -3,6 +3,33 @@ const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const db = require('../config/db');
 const { validationResult } = require('express-validator');
+const { sendMail } = require('../services/mailService');
+
+let resetTableReady;
+const isDevelopment = process.env.NODE_ENV !== 'production';
+const isMailOptional = process.env.MAIL_REQUIRED !== 'true';
+
+const ensurePasswordResetTable = async () => {
+  if (!resetTableReady) {
+    resetTableReady = db.execute(`
+      CREATE TABLE IF NOT EXISTS password_reset_otps (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        email VARCHAR(191) NOT NULL,
+        otp_hash VARCHAR(255) NOT NULL,
+        expires_at DATETIME NOT NULL,
+        attempts INT NOT NULL DEFAULT 0,
+        verified_at DATETIME NULL,
+        consumed_at DATETIME NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_password_reset_email (email),
+        INDEX idx_password_reset_user (user_id)
+      )
+    `);
+  }
+
+  await resetTableReady;
+};
 
 const generateTokens = (user) => {
   const payload = { id: user.id, uuid: user.uuid, role: user.role, email: user.email };
@@ -10,6 +37,25 @@ const generateTokens = (user) => {
   const refreshToken = jwt.sign(payload, process.env.JWT_REFRESH_SECRET, { expiresIn: process.env.JWT_REFRESH_EXPIRE || '30d' });
   return { accessToken, refreshToken };
 };
+
+const generateOtp = () => `${Math.floor(100000 + Math.random() * 900000)}`;
+
+const buildResetOtpEmail = (name, otp) => ({
+  subject: 'BohoJazz password reset OTP',
+  html: `
+    <div style="font-family: Arial, sans-serif; color: #1a1208; max-width: 560px; margin: 0 auto; padding: 24px;">
+      <h2 style="margin-bottom: 8px;">BohoJazz Password Reset</h2>
+      <p style="margin: 0 0 16px;">Hi ${name || 'there'},</p>
+      <p style="margin: 0 0 16px;">Use this OTP to reset your BohoJazz account password:</p>
+      <div style="font-size: 32px; font-weight: 700; letter-spacing: 8px; background: #fcf7ef; border: 1px solid #eadfce; border-radius: 12px; padding: 18px 20px; text-align: center; margin: 16px 0;">
+        ${otp}
+      </div>
+      <p style="margin: 0 0 8px;">This OTP expires in 10 minutes.</p>
+      <p style="margin: 0; color: #7c6a5d;">If you did not request this, you can ignore this email.</p>
+    </div>
+  `,
+  text: `Your BohoJazz password reset OTP is ${otp}. It expires in 10 minutes.`,
+});
 
 // @POST /api/auth/register
 const register = async (req, res) => {
@@ -204,4 +250,148 @@ const changePassword = async (req, res) => {
   }
 };
 
-module.exports = { register, login, refreshToken, logout, getMe, changePassword };
+// @POST /api/auth/forgot-password/request-otp
+const requestPasswordResetOtp = async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(422).json({ success: false, errors: errors.array() });
+
+  const { email } = req.body;
+
+  try {
+    await ensurePasswordResetTable();
+
+    const [users] = await db.execute(
+      'SELECT id, name, email, status FROM users WHERE email = ? LIMIT 1',
+      [email]
+    );
+
+    if (!users.length || users[0].status !== 'active') {
+      return res.json({
+        success: true,
+        message: 'If this email is registered, an OTP has been sent.',
+      });
+    }
+
+    const user = users[0];
+    const otp = generateOtp();
+    const otpHash = await bcrypt.hash(otp, 10);
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+    await db.execute(
+      'UPDATE password_reset_otps SET consumed_at = NOW() WHERE user_id = ? AND consumed_at IS NULL',
+      [user.id]
+    );
+
+    await db.execute(
+      'INSERT INTO password_reset_otps (user_id, email, otp_hash, expires_at) VALUES (?, ?, ?, ?)',
+      [user.id, user.email, otpHash, expiresAt]
+    );
+
+    const mail = buildResetOtpEmail(user.name, otp);
+
+    try {
+      await sendMail({
+        to: user.email,
+        subject: mail.subject,
+        html: mail.html,
+        text: mail.text,
+      });
+    } catch (mailError) {
+      if (!isDevelopment || !isMailOptional) {
+        throw mailError;
+      }
+
+      console.warn('Password reset OTP mail failed in development mode:', mailError.message);
+      console.warn(`Development OTP for ${user.email}: ${otp}`);
+
+      return res.json({
+        success: true,
+        message: 'Mail failed in development mode. Use the OTP from the backend console.',
+        devOtp: otp,
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'OTP has been sent to your email.',
+    });
+  } catch (err) {
+    if (isDevelopment && isMailOptional) {
+      console.warn('Request password reset OTP warning:', err.message);
+    } else {
+      console.error('Request password reset OTP error:', err);
+    }
+    res.status(500).json({ success: false, message: err.message || 'Unable to send OTP right now.' });
+  }
+};
+
+// @POST /api/auth/forgot-password/reset
+const resetPasswordWithOtp = async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(422).json({ success: false, errors: errors.array() });
+
+  const { email, otp, newPassword } = req.body;
+
+  try {
+    await ensurePasswordResetTable();
+
+    const [otps] = await db.execute(
+      `SELECT pro.id, pro.user_id, pro.otp_hash, pro.attempts, pro.expires_at, u.status
+       FROM password_reset_otps pro
+       JOIN users u ON u.id = pro.user_id
+       WHERE pro.email = ? AND pro.consumed_at IS NULL
+       ORDER BY pro.created_at DESC
+       LIMIT 1`,
+      [email]
+    );
+
+    if (!otps.length) {
+      return res.status(400).json({ success: false, message: 'Invalid or expired OTP.' });
+    }
+
+    const otpRow = otps[0];
+    if (otpRow.status !== 'active') {
+      return res.status(403).json({ success: false, message: 'This account is not active.' });
+    }
+
+    if (new Date(otpRow.expires_at) < new Date()) {
+      await db.execute('UPDATE password_reset_otps SET consumed_at = NOW() WHERE id = ?', [otpRow.id]);
+      return res.status(400).json({ success: false, message: 'OTP has expired. Please request a new one.' });
+    }
+
+    if (otpRow.attempts >= 5) {
+      await db.execute('UPDATE password_reset_otps SET consumed_at = NOW() WHERE id = ?', [otpRow.id]);
+      return res.status(429).json({ success: false, message: 'Too many incorrect OTP attempts. Request a new OTP.' });
+    }
+
+    const isValidOtp = await bcrypt.compare(otp, otpRow.otp_hash);
+    if (!isValidOtp) {
+      await db.execute('UPDATE password_reset_otps SET attempts = attempts + 1 WHERE id = ?', [otpRow.id]);
+      return res.status(400).json({ success: false, message: 'Invalid OTP.' });
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 12);
+    await db.execute('UPDATE users SET password = ? WHERE id = ?', [hashedPassword, otpRow.user_id]);
+    await db.execute(
+      'UPDATE password_reset_otps SET verified_at = NOW(), consumed_at = NOW() WHERE id = ?',
+      [otpRow.id]
+    );
+    await db.execute('DELETE FROM refresh_tokens WHERE user_id = ?', [otpRow.user_id]);
+
+    res.json({ success: true, message: 'Password reset successful. Please sign in with your new password.' });
+  } catch (err) {
+    console.error('Reset password with OTP error:', err);
+    res.status(500).json({ success: false, message: 'Unable to reset password right now.' });
+  }
+};
+
+module.exports = {
+  register,
+  login,
+  refreshToken,
+  logout,
+  getMe,
+  changePassword,
+  requestPasswordResetOtp,
+  resetPasswordWithOtp,
+};

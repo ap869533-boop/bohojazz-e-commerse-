@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
-import { SlidersHorizontal, X, ChevronDown } from 'lucide-react';
+import { useParams, useSearchParams } from 'react-router-dom';
+import { SlidersHorizontal } from 'lucide-react';
 import Navbar from '../../components/common/Navbar';
 import Footer from '../../components/common/Footer';
 import ProductCard from '../../components/common/ProductCard';
@@ -47,11 +47,27 @@ const Shop = () => {
   useEffect(() => { fetchProducts(); }, [fetchProducts]);
 
   const updateFilter = (key, value) => {
-    setFilters(prev => ({ ...prev, [key]: value, page: 1 }));
+    setFilters(prev => {
+      const nextFilters = {
+        ...prev,
+        [key]: value,
+      };
+
+      if (key !== 'page') nextFilters.page = 1;
+
+      const params = new URLSearchParams();
+      Object.entries(nextFilters).forEach(([paramKey, paramValue]) => {
+        if (paramValue) params.set(paramKey, paramValue.toString());
+      });
+      setSearchParams(params);
+
+      return nextFilters;
+    });
   };
 
   const clearFilters = () => {
     setFilters({ sort: 'newest', min_price: '', max_price: '', search: '', featured: '', page: 1 });
+    setSearchParams({ sort: 'newest' });
   };
 
   const sortOptions = [

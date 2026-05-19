@@ -4,15 +4,21 @@ import { ArrowRight, Sparkles, Truck, RefreshCw, Shield } from 'lucide-react';
 import Navbar from '../../components/common/Navbar';
 import Footer from '../../components/common/Footer';
 import ProductCard from '../../components/common/ProductCard';
+import LoginModal from '../../components/auth/LoginModal';
+import { useAuth } from '../../context/AuthContext';
 import api, { getImageUrl } from '../../utils/api';
 
+const LOGIN_MODAL_RUNTIME_KEY = '__bohojazzLoginModalShown';
+
 const Home = () => {
+  const { loading: authLoading, isAuthenticated } = useAuth();
   const [featuredProducts, setFeaturedProducts] = useState([]);
   const [newArrivals, setNewArrivals] = useState([]);
   const [categories, setCategories] = useState([]);
   const [banners, setBanners] = useState([]);
   const [loading, setLoading] = useState(true);
   const [currentBanner, setCurrentBanner] = useState(0);
+  const [showLoginModal, setShowLoginModal] = useState(false);
 
   useEffect(() => {
     const fetch = async () => {
@@ -43,6 +49,22 @@ const Home = () => {
     }
   }, [banners]);
 
+  useEffect(() => {
+    if (authLoading || isAuthenticated() || window[LOGIN_MODAL_RUNTIME_KEY]) return undefined;
+
+    const timer = window.setTimeout(() => {
+      window[LOGIN_MODAL_RUNTIME_KEY] = true;
+      setShowLoginModal(true);
+    }, 650);
+
+    return () => window.clearTimeout(timer);
+  }, [authLoading, isAuthenticated]);
+
+  const handleCloseLoginModal = () => {
+    window[LOGIN_MODAL_RUNTIME_KEY] = true;
+    setShowLoginModal(false);
+  };
+
   const categoryColors = [
     'from-rose-100 to-pink-200', 'from-amber-100 to-yellow-200',
     'from-emerald-100 to-green-200', 'from-sky-100 to-blue-200',
@@ -51,6 +73,7 @@ const Home = () => {
 
   return (
     <div className="min-h-screen bg-boho-cream">
+      <LoginModal open={showLoginModal} onClose={handleCloseLoginModal} />
       <Navbar />
 
       {/* Hero Banner */}
