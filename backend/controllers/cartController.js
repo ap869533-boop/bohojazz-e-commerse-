@@ -35,18 +35,36 @@ const getCart = async (req, res) => {
 const addToCart = async (req, res) => {
   try {
     const { product_id, variant_id, quantity = 1 } = req.body;
+    const parsedQuantity = Math.max(1, parseInt(quantity, 10) || 1);
     const [products] = await db.execute('SELECT id, stock_quantity, manage_stock FROM products WHERE id = ? AND status = "published"', [product_id]);
     if (!products.length) return res.status(404).json({ success: false, message: 'Product not found.' });
     const product = products[0];
-    if (product.manage_stock && product.stock_quantity < quantity) {
+
+    const [existingItems] = await db.execute(
+      `SELECT id, quantity FROM cart
+       WHERE user_id = ? AND product_id = ? AND (
+         (variant_id IS NULL AND ? IS NULL) OR variant_id = ?
+       )
+       LIMIT 1`,
+      [req.user.id, product_id, variant_id || null, variant_id || null]
+    );
+
+    const nextQuantity = (existingItems[0]?.quantity || 0) + parsedQuantity;
+    if (product.manage_stock && product.stock_quantity < nextQuantity) {
       return res.status(400).json({ success: false, message: 'Insufficient stock.' });
     }
 
-    await db.execute(
-      `INSERT INTO cart (user_id, product_id, variant_id, quantity) VALUES (?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE quantity = quantity + ?`,
-      [req.user.id, product_id, variant_id || null, quantity, quantity]
-    );
+    if (existingItems.length) {
+      await db.execute(
+        'UPDATE cart SET quantity = ? WHERE id = ? AND user_id = ?',
+        [nextQuantity, existingItems[0].id, req.user.id]
+      );
+    } else {
+      await db.execute(
+        'INSERT INTO cart (user_id, product_id, variant_id, quantity) VALUES (?, ?, ?, ?)',
+        [req.user.id, product_id, variant_id || null, parsedQuantity]
+      );
+    }
 
     res.json({ success: true, message: 'Added to cart.' });
   } catch (err) {

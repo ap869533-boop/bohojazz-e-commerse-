@@ -258,4 +258,4 @@ npm run build
 
 ---
 
-**Built with ❤️ for BohoJazz**
+

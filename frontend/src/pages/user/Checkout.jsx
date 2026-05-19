@@ -1,30 +1,61 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { MapPin, Plus, CreditCard, Wallet, Banknote } from 'lucide-react';
+import { MapPin, Plus, CreditCard, Banknote } from 'lucide-react';
+import toast from 'react-hot-toast';
 import Navbar from '../../components/common/Navbar';
 import Footer from '../../components/common/Footer';
 import { useCart } from '../../context/CartContext';
 import api, { formatCurrency, handleApiError } from '../../utils/api';
-import toast from 'react-hot-toast';
+
+const loadRazorpayScript = () => new Promise((resolve, reject) => {
+  if (window.Razorpay) {
+    resolve(true);
+    return;
+  }
+
+  const existingScript = document.querySelector('script[data-razorpay-checkout="true"]');
+  if (existingScript) {
+    existingScript.addEventListener('load', () => resolve(true), { once: true });
+    existingScript.addEventListener('error', () => reject(new Error('Unable to load Razorpay checkout.')), { once: true });
+    return;
+  }
+
+  const script = document.createElement('script');
+  script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+  script.async = true;
+  script.dataset.razorpayCheckout = 'true';
+  script.onload = () => resolve(true);
+  script.onerror = () => reject(new Error('Unable to load Razorpay checkout.'));
+  document.body.appendChild(script);
+});
 
 const Checkout = () => {
   const { cart, fetchCart } = useCart();
   const navigate = useNavigate();
   const [addresses, setAddresses] = useState([]);
   const [selectedAddress, setSelectedAddress] = useState(null);
-  const [paymentMethod, setPaymentMethod] = useState('cod');
+  const [paymentMethod, setPaymentMethod] = useState('razorpay');
   const [couponCode, setCouponCode] = useState('');
   const [coupon, setCoupon] = useState(null);
   const [placing, setPlacing] = useState(false);
   const [showAddAddress, setShowAddAddress] = useState(false);
-  const [newAddress, setNewAddress] = useState({ name: '', phone: '', address_line1: '', city: '', state: '', pincode: '', country: 'India', is_default: false });
+  const [newAddress, setNewAddress] = useState({
+    name: '',
+    phone: '',
+    address_line1: '',
+    city: '',
+    state: '',
+    pincode: '',
+    country: 'India',
+    is_default: false,
+  });
 
   useEffect(() => {
-    api.get('/addresses').then(r => {
-      const addrs = r.data.data || [];
+    api.get('/addresses').then((response) => {
+      const addrs = response.data.data || [];
       setAddresses(addrs);
-      const def = addrs.find(a => a.is_default) || addrs[0];
-      if (def) setSelectedAddress(def.id);
+      const defaultAddress = addrs.find((addr) => addr.is_default) || addrs[0];
+      if (defaultAddress) setSelectedAddress(defaultAddress.id);
     }).catch(() => {});
   }, []);
 
@@ -33,7 +64,9 @@ const Checkout = () => {
       const { data } = await api.post('/coupons/validate', { code: couponCode, order_amount: cart.subtotal });
       setCoupon(data.data);
       toast.success(`Coupon applied! You save ${formatCurrency(data.data.discount_amount)}`);
-    } catch (err) { handleApiError(err, 'Invalid coupon'); }
+    } catch (err) {
+      handleApiError(err, 'Invalid coupon');
+    }
   };
 
   const addAddress = async () => {
@@ -44,22 +77,94 @@ const Checkout = () => {
       setSelectedAddress(data.data.id);
       setShowAddAddress(false);
       toast.success('Address added.');
-    } catch (err) { handleApiError(err); }
+    } catch (err) {
+      handleApiError(err);
+    }
+  };
+
+  const placeCodOrder = async () => {
+    const { data } = await api.post('/orders', {
+      address_id: selectedAddress,
+      payment_method: 'cod',
+      coupon_code: coupon ? couponCode : null,
+    });
+
+    await fetchCart();
+    navigate(`/order-success/${data.data.order_id}`);
+  };
+
+  const startRazorpayPayment = async () => {
+    await loadRazorpayScript();
+
+    const { data } = await api.post('/payments/razorpay/order', {
+      address_id: selectedAddress,
+      coupon_code: coupon ? couponCode : null,
+    });
+
+    const paymentData = data.data;
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    const selectedAddressData = addresses.find((addr) => addr.id === selectedAddress);
+
+    const razorpay = new window.Razorpay({
+      key: paymentData.key_id,
+      amount: paymentData.amount,
+      currency: paymentData.currency,
+      name: paymentData.company_name || 'BohoJazz',
+      description: `Order ${paymentData.order_number}`,
+      order_id: paymentData.razorpay_order_id,
+      handler: async (response) => {
+        try {
+          const verifyResponse = await api.post('/payments/razorpay/verify', response);
+          await fetchCart();
+          toast.success('Payment successful.');
+          navigate(`/order-success/${verifyResponse.data.data.order_id}`);
+        } catch (err) {
+          handleApiError(err, 'Payment verification failed.');
+        } finally {
+          setPlacing(false);
+        }
+      },
+      modal: {
+        ondismiss: () => {
+          setPlacing(false);
+          toast('Payment window closed.');
+        },
+      },
+      prefill: {
+        name: user?.name || '',
+        email: user?.email || '',
+        contact: selectedAddressData?.phone || '',
+      },
+      theme: {
+        color: '#b45e35',
+      },
+    });
+
+    razorpay.on('payment.failed', () => {
+      setPlacing(false);
+      toast.error('Payment failed. Please try again.');
+    });
+
+    razorpay.open();
   };
 
   const placeOrder = async () => {
-    if (!selectedAddress) { toast.error('Please select a delivery address.'); return; }
+    if (!selectedAddress) {
+      toast.error('Please select a delivery address.');
+      return;
+    }
+
     setPlacing(true);
     try {
-      const { data } = await api.post('/orders', {
-        address_id: selectedAddress,
-        payment_method: paymentMethod,
-        coupon_code: coupon ? couponCode : null,
-      });
-      await fetchCart();
-      navigate(`/order-success/${data.data.order_id}`);
-    } catch (err) { handleApiError(err); }
-    finally { setPlacing(false); }
+      if (paymentMethod === 'cod') {
+        await placeCodOrder();
+      } else {
+        await startRazorpayPayment();
+      }
+    } catch (err) {
+      setPlacing(false);
+      handleApiError(err);
+    }
   };
 
   const discount = coupon?.discount_amount || 0;
@@ -75,10 +180,12 @@ const Checkout = () => {
         <h1 className="font-display text-3xl mb-6">Checkout</h1>
         <div className="grid lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-5">
-            {/* Addresses */}
             <div className="card p-5">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="font-display text-lg flex items-center gap-2"><MapPin size={18} className="text-boho-terra" />Delivery Address</h3>
+                <h3 className="font-display text-lg flex items-center gap-2">
+                  <MapPin size={18} className="text-boho-terra" />
+                  Delivery Address
+                </h3>
                 <button onClick={() => setShowAddAddress(!showAddAddress)} className="flex items-center gap-1 text-sm text-boho-terra hover:underline">
                   <Plus size={15} /> Add New
                 </button>
@@ -92,19 +199,29 @@ const Checkout = () => {
                     { key: 'city', placeholder: 'City', col: 1 },
                     { key: 'state', placeholder: 'State', col: 1 },
                     { key: 'pincode', placeholder: 'Pincode', col: 1 },
-                  ].map(f => (
-                    <input key={f.key} placeholder={f.placeholder} value={newAddress[f.key]}
-                      onChange={e => setNewAddress(p => ({ ...p, [f.key]: e.target.value }))}
-                      className={`input-field text-sm ${f.col === 2 ? 'col-span-2' : ''}`} />
+                  ].map((field) => (
+                    <input
+                      key={field.key}
+                      placeholder={field.placeholder}
+                      value={newAddress[field.key]}
+                      onChange={(event) => setNewAddress((prev) => ({ ...prev, [field.key]: event.target.value }))}
+                      className={`input-field text-sm ${field.col === 2 ? 'col-span-2' : ''}`}
+                    />
                   ))}
                   <button onClick={addAddress} className="btn-primary col-span-2">Save Address</button>
                 </div>
               )}
               <div className="space-y-3">
-                {addresses.map(addr => (
+                {addresses.map((addr) => (
                   <label key={addr.id} className={`flex items-start gap-3 p-4 rounded-xl border-2 cursor-pointer transition-all ${selectedAddress === addr.id ? 'border-boho-terra bg-primary-50' : 'border-gray-200 hover:border-gray-300'}`}>
-                    <input type="radio" name="address" value={addr.id} checked={selectedAddress === addr.id}
-                      onChange={() => setSelectedAddress(addr.id)} className="mt-1 accent-boho-terra" />
+                    <input
+                      type="radio"
+                      name="address"
+                      value={addr.id}
+                      checked={selectedAddress === addr.id}
+                      onChange={() => setSelectedAddress(addr.id)}
+                      className="mt-1 accent-boho-terra"
+                    />
                     <div className="text-sm">
                       <p className="font-semibold text-gray-800">{addr.name} · {addr.phone}</p>
                       <p className="text-gray-500">{addr.address_line1}{addr.address_line2 ? `, ${addr.address_line2}` : ''}</p>
@@ -114,23 +231,42 @@ const Checkout = () => {
                   </label>
                 ))}
                 {addresses.length === 0 && !showAddAddress && (
-                  <p className="text-sm text-gray-500 text-center py-4">No addresses saved. <button onClick={() => setShowAddAddress(true)} className="text-boho-terra hover:underline">Add one now</button></p>
+                  <p className="text-sm text-gray-500 text-center py-4">
+                    No addresses saved. <button onClick={() => setShowAddAddress(true)} className="text-boho-terra hover:underline">Add one now</button>
+                  </p>
                 )}
               </div>
             </div>
 
-            {/* Payment */}
             <div className="card p-5">
-              <h3 className="font-display text-lg mb-4 flex items-center gap-2"><CreditCard size={18} className="text-boho-terra" />Payment Method</h3>
+              <h3 className="font-display text-lg mb-4 flex items-center gap-2">
+                <CreditCard size={18} className="text-boho-terra" />
+                Payment Method
+              </h3>
               <div className="space-y-3">
                 {[
-                  { value: 'cod', label: 'Cash on Delivery', sub: 'Pay when your order arrives', icon: Banknote },
-                  { value: 'upi', label: 'UPI Payment', sub: 'Google Pay, PhonePe, Paytm', icon: Wallet },
-                  { value: 'card', label: 'Credit/Debit Card', sub: 'Visa, Mastercard, RuPay', icon: CreditCard },
+                  {
+                    value: 'razorpay',
+                    label: 'Razorpay Online Payment',
+                    sub: 'UPI, Cards, Netbanking and Wallets in Razorpay test checkout',
+                    icon: CreditCard,
+                  },
+                  {
+                    value: 'cod',
+                    label: 'Cash on Delivery',
+                    sub: 'Pay when your order arrives',
+                    icon: Banknote,
+                  },
                 ].map(({ value, label, sub, icon: Icon }) => (
                   <label key={value} className={`flex items-center gap-3 p-4 rounded-xl border-2 cursor-pointer transition-all ${paymentMethod === value ? 'border-boho-terra bg-primary-50' : 'border-gray-200 hover:border-gray-300'}`}>
-                    <input type="radio" name="payment" value={value} checked={paymentMethod === value}
-                      onChange={() => setPaymentMethod(value)} className="accent-boho-terra" />
+                    <input
+                      type="radio"
+                      name="payment"
+                      value={value}
+                      checked={paymentMethod === value}
+                      onChange={() => setPaymentMethod(value)}
+                      className="accent-boho-terra"
+                    />
                     <Icon size={20} className="text-boho-terra flex-shrink-0" />
                     <div>
                       <p className="text-sm font-semibold text-gray-800">{label}</p>
@@ -142,12 +278,11 @@ const Checkout = () => {
             </div>
           </div>
 
-          {/* Summary */}
           <div>
             <div className="card p-5 sticky top-24">
               <h3 className="font-display text-lg mb-4">Order Summary</h3>
               <div className="space-y-2 mb-4 max-h-48 overflow-y-auto">
-                {cart.items.map(item => (
+                {cart.items.map((item) => (
                   <div key={item.id} className="flex items-center gap-2 text-xs text-gray-600">
                     <div className="w-10 h-12 bg-gray-100 rounded overflow-hidden flex-shrink-0">
                       <img src={item.image} alt="" className="w-full h-full object-cover" />
@@ -161,11 +296,14 @@ const Checkout = () => {
                 ))}
               </div>
 
-              {/* Coupon */}
               <div className="flex gap-2 mb-4">
-                <input type="text" placeholder="Coupon code" value={couponCode}
-                  onChange={e => setCouponCode(e.target.value.toUpperCase())}
-                  className="input-field text-xs flex-1" />
+                <input
+                  type="text"
+                  placeholder="Coupon code"
+                  value={couponCode}
+                  onChange={(event) => setCouponCode(event.target.value.toUpperCase())}
+                  className="input-field text-xs flex-1"
+                />
                 <button onClick={applyCoupon} className="px-3 py-2 bg-boho-terra text-white text-xs rounded-lg hover:bg-boho-rust transition-colors">Apply</button>
               </div>
 
@@ -178,10 +316,9 @@ const Checkout = () => {
                 <div className="flex justify-between font-bold text-base"><span>Total</span><span className="text-boho-terra">{formatCurrency(total)}</span></div>
               </div>
 
-              <button onClick={placeOrder} disabled={placing}
-                className="btn-primary w-full flex items-center justify-center gap-2">
+              <button onClick={placeOrder} disabled={placing} className="btn-primary w-full flex items-center justify-center gap-2">
                 {placing ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : null}
-                {placing ? 'Placing Order...' : `Place Order · ${formatCurrency(total)}`}
+                {placing ? 'Processing...' : `${paymentMethod === 'razorpay' ? 'Pay with Razorpay' : 'Place Order'} · ${formatCurrency(total)}`}
               </button>
             </div>
           </div>

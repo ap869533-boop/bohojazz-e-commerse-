@@ -112,6 +112,8 @@ router.delete('/addresses/:id', authenticate, async (req, res) => {
 });
 
 // =================== ORDER ROUTES ===================
+router.post('/payments/razorpay/order', authenticate, authorize('user', 'vendor'), orderCtrl.createRazorpayOrder);
+router.post('/payments/razorpay/verify', authenticate, authorize('user', 'vendor'), orderCtrl.verifyRazorpayPayment);
 router.post('/orders', authenticate, authorize('user', 'vendor'), orderCtrl.placeOrder);
 router.get('/orders', authenticate, orderCtrl.getUserOrders);
 router.get('/orders/:id', authenticate, orderCtrl.getOrder);
