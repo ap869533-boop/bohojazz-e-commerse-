@@ -10,35 +10,41 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. GitHub Actions khud code download karega
       - name: Checkout code
         uses: actions/checkout@v3
 
-      # 2. SSH configuration setup karna
       - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.EC2_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
+          
+          if [ -z "${{ secrets.EC2_HOST }}" ]; then
+            echo "ERROR: secrets.EC2_HOST is empty!"
+            exit 1
+          fi
           ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts
 
-      # 3. Server par folder banana (agar pehle se na ho)
-      - name: Create app directory on EC2
-        run: |
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} "mkdir -p ~/bohojazz-e-commerce-"
-
-      # 4. GitHub se saara code direct EC2 server par transfer karna
-      - name: Copy code to EC2 via SCP
-        run: |
-          scp -i ~/.ssh/id_rsa -r ./* ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:~/bohojazz-e-commerce-/
-
-      # 5. EC2 server ke andar sirf Docker containers start karna
-      - name: Run Docker Compose on EC2
+      - name: Deploy to EC2
         run: |
           ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
-            cd ~/bohojazz-e-commerce- || exit 1
             
-            # Purane containers ko rokna aur naye build karna
+            # 1. Sahi spelling ke saath clone karein agar folder nahi hai (Public repository hai)
+            if [ ! -d "bohojazz-e-commerse-" ]; then
+              echo "Cloning repository with correct spelling..."
+              git clone https://github.com/ap869533-boop/bohojazz-e-commerse-.git
+            fi
+            
+            # 2. Sahi folder ke andar jayein
+            cd bohojazz-e-commerse- || exit 1
+            
+            # 3. URL ko hamesha ke liye update rakhein
+            git remote set-url origin https://github.com/ap869533-boop/bohojazz-e-commerse-.git
+            
+            # 4. Naya code pull karein
+            git pull origin main
+
+            # 5. Naye Docker Compose (v5.1.4 जो आपने इन्स्टॉल किया) se restart karein
             docker compose down || true
             docker compose up -d --build
           EOF
