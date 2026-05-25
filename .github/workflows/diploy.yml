@@ -29,22 +29,30 @@ jobs:
         run: |
           ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
             
-            # 1. Sahi spelling ke saath clone karein agar folder nahi hai (Public repository hai)
-            if [ ! -d "bohojazz-e-commerse-" ]; then
-              echo "Cloning repository with correct spelling..."
-              git clone https://github.com/ap869533-boop/bohojazz-e-commerse-.git
+            # 1. Agar server par project folder nahi hai, to clone karein
+            if [ ! -d "~/bohojazz-e-commerse-" ]; then
+              echo "Cloning repository..."
+              git clone https://github.com/ap869533-boop/bohojazz-e-commerse-.git ~/bohojazz-e-commerse-
             fi
             
             # 2. Sahi folder ke andar jayein
-            cd bohojazz-e-commerse- || exit 1
+            cd ~/bohojazz-e-commerse- || exit 1
             
-            # 3. URL ko hamesha ke liye update rakhein
+            # 3. URL reset karein (Spelling fix)
             git remote set-url origin https://github.com/ap869533-boop/bohojazz-e-commerse-.git
             
-            # 4. Naya code pull karein
+            # 4. Latest code pull karein
+            git fetch --all
+            git reset --hard origin/main
             git pull origin main
 
-            # 5. Naye Docker Compose (v5.1.4 जो आपने इन्स्टॉल किया) se restart karein
+            # 🔥 DOCKER & ENV FIX: GitHub Secret se data lekar EC2 par automatic .env file banana
+            echo "${{ secrets.BACKEND_ENV }}" > ~/bohojazz-e-commerse-/backend/.env
+
+            # 5. Docker compose se teeno containers ko restart karna
+            echo "Stopping old containers..."
             docker compose down || true
+            
+            echo "Building and starting Frontend, Backend, and Database..."
             docker compose up -d --build
           EOF
