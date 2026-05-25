@@ -1,0 +1,54 @@
+version: "3.9"
+
+services:
+
+  frontend:
+    build: ./frontend
+    container_name: ecommerce_frontend
+
+    restart: always
+
+    ports:
+      - "3000:3000"
+
+    depends_on:
+      - backend
+
+  backend:
+    build: ./backend
+    container_name: ecommerce_backend
+
+    restart: always
+
+    ports:
+      - "5000:5000"
+
+    env_file:
+      - ./backend/.env
+
+    depends_on:
+      - mysql
+
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+
+  mysql:
+    image: mysql:8
+
+    container_name: ecommerce_mysql
+
+    restart: always
+
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME}
+
+    ports:
+      - "3307:3306"
+
+    volumes:
+      - mysql-data:/var/lib/mysql
+
+volumes:
+  mysql-data:
