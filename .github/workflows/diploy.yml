@@ -1,4 +1,4 @@
-name: Deploy to EC2
+name: Deploy to EC2 (Docker Compose V2)
 
 on:
   push:
@@ -11,37 +11,40 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      - name: Setup SSH
+      - name: Setup SSH key
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.EC2_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          
-          if [ -z "${{ secrets.EC2_HOST }}" ]; then
-            echo "ERROR: secrets.EC2_HOST is empty!"
-            exit 1
-          fi
           ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts
 
       - name: Deploy to EC2
         run: |
-          # StrictHostKeyChecking=no lagane se connection block nahi hoga
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
-            
-            # 1. Check karein agar project folder nahi hai to sahi repository clone karein
-            if [ ! -d "~/bohojazz-e-commerce" ]; then
-              git clone https://github.com/ap869533-boop/bohojazz-e-commerce-.git ~/bohojazz-e-commerce
+          ssh -i ~/.ssh/id_rsa ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+
+            set -e
+
+            APP_DIR=/home/ubuntu/app
+
+            # Clone repo if not exists
+            if [ ! -d "$APP_DIR" ]; then
+              git clone https://github.com/YOUR_USERNAME/YOUR_REPO.git $APP_DIR
             fi
-            
-            # 2. Project folder ke andar jayein
-            cd ~/bohojazz-e-commerce
-            
-            # 3. GitHub se naya code pull karein
+
+            cd $APP_DIR
+
+            # Pull latest code
             git pull origin main
 
-            # 4. Modern Docker Compose commands (bina hyphen ke)
+            # Stop old containers
             docker compose down || true
+
+            # Build & start containers
             docker compose up -d --build
+
+            # Show status
+            docker compose ps
+
           EOF
