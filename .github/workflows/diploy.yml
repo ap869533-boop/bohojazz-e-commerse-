@@ -30,7 +30,7 @@ jobs:
 
             # Clone repo if not exists
             if [ ! -d "$APP_DIR" ]; then
-              git clone https://github.com/YOUR_USERNAME/YOUR_REPO.git $APP_DIR
+              git clone https://github.com/ap869533-boop/bohojazz-e-commerse-.git $APP_DIR
             fi
 
             cd $APP_DIR
