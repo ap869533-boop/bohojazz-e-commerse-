@@ -29,22 +29,22 @@ jobs:
         run: |
           ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
             
-            # 1. Agar project folder pehle se nahi hai, to token ke saath clone karein
-            if [ ! -d "~/bohojazz-e-commerce" ]; then
+            # 1. Agar folder nahi hai, to direct HTTPS URL se bina token ke clone karein
+            if [ ! -d "bohojazz-e-commerce-" ]; then
               echo "Cloning repository..."
-              git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/ap869533-boop/bohojazz-e-commerce-.git ~/bohojazz-e-commerce
+              git clone https://github.com/ap869533-boop/bohojazz-e-commerce-.git
             fi
             
-            # 2. Project folder ke andar jayein
-            cd ~/bohojazz-e-commerce || exit 1
+            # 2. Sahi folder ke andar jayein (Aapki repo ka naam bohojazz-e-commerce- hai)
+            cd bohojazz-e-commerce- || cd ~/bohojazz-e-commerce- || exit 1
             
-            # 3. Remote URL ko update karein taaki pull bina credentials ke chale
-            git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/ap869533-boop/bohojazz-e-commerce-.git
+            # 3. URL ko simple reset karein
+            git remote set-url origin https://github.com/ap869533-boop/bohojazz-e-commerce-.git
             
             # 4. Latest code pull karein
             git pull origin main
 
-            # 5. Containers ko restart karein (Space ke saath compose)
+            # 5. Containers ko restart karein
             docker compose down || true
             docker compose up -d --build
           EOF
